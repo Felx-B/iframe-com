@@ -5,9 +5,7 @@ const innerDiv = document.getElementById("inner");
 const parentDiv = document.getElementById("parent");
 
 let iframes = {};
-
-let parentId;
-let myId;
+let parentId, myId;
 let childrenIds = [];
 
 // On main page init -> create first iframe
@@ -27,11 +25,11 @@ function mainPageInit() {
       m.ports[0].postMessage(id);
     }
     if (m.ports && m.data.type == "getProperty") {
-      const result = await askTargetGetProperty(
-        iframes[m.data.childId],
-        m.data.childId,
-        m.data.propertyName
-      );
+      const result = await askTarget(iframes[m.data.childId],m.data);
+      m.ports[0].postMessage(result);
+    }
+    if (m.ports && m.data.type == "callMethod") {
+      const result = await askTarget(iframes[m.data.childId], m.data);
       m.ports[0].postMessage(result);
     }
   };
@@ -44,6 +42,7 @@ function createIframe(parentId) {
   mainContainer.appendChild(myIframe);
 
   const id = Math.random().toString().substring(2, 8);
+  // Wait until iframe is ready, and init id and parent id
   setTimeout(() => {
     myIframe.contentWindow.postMessage({ type: "init", id, parent: parentId });
   }, 100);
@@ -63,6 +62,11 @@ function iframeInit() {
     if (e.data.type == "getProperty") {
       e.ports[0].postMessage(window[e.data.propertyName]);
     }
+    if (e.data.type == "callMethod") {
+      e.ports[0].postMessage(
+        window[e.data.methodName].apply(this, e.data.parameters)
+      );
+    }
   };
 
   const myBtn = document.createElement("button");
@@ -74,43 +78,57 @@ function iframeInit() {
 }
 
 async function createChild() {
-  const childId = await askParentoToCreateChildIframe();
+  const childId = await askTarget(window.parent, {
+    type: "createChild",
+    parent: myId,
+  });
   childrenDiv.innerText += ` ${childId}`;
   childrenIds.push(childId);
 
   const myBtn = document.createElement("button");
   myBtn.onclick = () => getChildProperty(childId);
-  myBtn.innerText = `Get ${childId} property`;
+  myBtn.innerText = `Get ${childId} inner ID`;
   mainContainer.appendChild(myBtn);
-}
-
-function askParentoToCreateChildIframe() {
-  return new Promise((resolve) => {
-    const channel = new MessageChannel();
-    // this will fire when iframe will answer
-    channel.port1.onmessage = (e) => resolve(e.data);
-    // let iframe know we're expecting an answer
-    // send it its own port
-    window.parent.postMessage({ type: "createChild", parent: myId }, "*", [
-      channel.port2,
-    ]);
-  });
+  const myBtnFn = document.createElement("button");
+  myBtnFn.onclick = () => callChildMethod(childId);
+  myBtnFn.innerText = `Call ${childId} method`;
+  mainContainer.appendChild(myBtnFn);
 }
 
 async function getChildProperty(childId) {
-  const result = await askTargetGetProperty(window.parent, childId, "innerId");
+  const result = await askTarget(window.parent, {
+    type: "getProperty",
+    childId,
+    propertyName: "innerId",
+  });
   console.log(`myId is ${myId} innerId of iframe ${childId} is ${result}`);
 }
 
-function askTargetGetProperty(target, childId, propertyName) {
+function compute(a, b) {
+  return `${myId} - ${a * b}`;
+}
+
+async function callChildMethod(childId) {
+  const result = await askTarget(window.parent, {
+    type: "callMethod",
+    childId,
+    methodName: "compute",
+    parameters: [7, 3],
+  });
+  console.log(
+    `myId is ${myId} compute method of iframe ${childId}, with parameters ${[
+      7, 3,
+    ]} is "${result}"`
+  );
+}
+
+function askTarget(target, message) {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     // this will fire when iframe will answer
     channel.port1.onmessage = (e) => resolve(e.data);
     // let iframe know we're expecting an answer
     // send it its own port
-    target.postMessage({ type: "getProperty", childId, propertyName }, "*", [
-      channel.port2,
-    ]);
+    target.postMessage(message, "*", [channel.port2]);
   });
 }
